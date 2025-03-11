@@ -1,0 +1,404 @@
+openapi: 3.0.0
+info:
+    title: Doctor-Patient API
+    description: API for managing doctor-patient interactions including authentication, notes, assignments, and more.
+    version: "1.0.0"
+
+servers:
+    - url: http://localhost:3000/api
+      description: Local development server
+
+paths:
+    /auth/signup:
+        post:
+            summary: User Signup
+            description: Create a new user account and generate authentication tokens.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/SignupRequest"
+            responses:
+                "201":
+                    description: User created successfully.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/AuthResponse"
+                "409":
+                    description: User already exists.
+                default:
+                    description: Unexpected error.
+
+    /auth/login:
+        post:
+            summary: User Login
+            description: Authenticate an existing user and issue new tokens.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: "#/components/schemas/LoginRequest"
+            responses:
+                "200":
+                    description: Login successful.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/AuthResponse"
+                "401":
+                    description: Invalid email or password.
+                default:
+                    description: Unexpected error.
+
+    /auth/logout:
+        post:
+            summary: User Logout
+            description: Invalidate the user's session and clear authentication cookies.
+            responses:
+                "200":
+                    description: Logout successful.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    message:
+                                        type: string
+                                        example: Logout successful
+                default:
+                    description: Unexpected error.
+
+    /auth/refresh:
+        post:
+            summary: Refresh Authentication Tokens
+            description: Refresh the access token (and optionally the refresh token) using a valid refresh token.
+            responses:
+                "200":
+                    description: Access token refreshed.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    message:
+                                        type: string
+                                        example: Access token refreshed
+                                    accessToken:
+                                        type: string
+                                    refreshToken:
+                                        type: string
+                "401":
+                    description: Unauthorized or invalid refresh token.
+                default:
+                    description: Unexpected error.
+
+    /doctor/get_patients:
+        get:
+            summary: Get Patients for a Doctor
+            description: >
+                Retrieves all patients assigned to the authenticated doctor.
+                The request must be authenticated, and the user must have a doctor role.
+            security:
+                - bearerAuth: []
+            responses:
+                "200":
+                    description: A list of patients assigned to the doctor.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    patients:
+                                        type: array
+                                        items:
+                                            $ref: "#/components/schemas/User"
+                "401":
+                    description: Unauthorized – either not authenticated or the user is not a doctor.
+                "404":
+                    description: No assignment found for this doctor.
+    /patient/available-doctors:
+        get:
+            summary: List Available Doctors
+            description: Returns a list of available doctors. Only doctors (users with role true) are returned, including fields like _id, email, and name.
+            security:
+                - bearerAuth: []
+            responses:
+                "200":
+                    description: A list of available doctors.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    doctors:
+                                        type: array
+                                        items:
+                                            $ref: "#/components/schemas/User"
+                "500":
+                    description: Internal server error.
+
+    /patient/select-doctor:
+        post:
+            summary: Select a Doctor
+            description: >
+                Allows an authenticated patient (user with role false) to select a doctor.
+                The patient must provide the doctor's ID in the request body. If the user is not a patient, a 403 error is returned.
+            security:
+                - bearerAuth: []
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                doctorId:
+                                    type: string
+                                    description: The ID of the doctor to select.
+                            required:
+                                - doctorId
+            responses:
+                "200":
+                    description: Doctor selected successfully.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    message:
+                                        type: string
+                                        example: Doctor selected successfully
+                                    assignment:
+                                        $ref: "#/components/schemas/Assignment"
+                "400":
+                    description: Bad request – doctorId is missing.
+                "403":
+                    description: Forbidden – only patients can select a doctor.
+                "500":
+                    description: Internal server error.
+    /notes/add_note_task:
+        post:
+            summary: Create Note Task
+            description: >
+                Creates a new note task by processing the original note using LLM to extract actionable steps.
+                Only doctors (authenticated users with role true) can access this endpoint.
+            security:
+                - bearerAuth: []
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                patientId:
+                                    type: string
+                                    description: The ID of the patient for whom the note is created.
+                                originalNote:
+                                    type: string
+                                    description: The text of the doctor's note.
+                            required:
+                                - patientId
+                                - originalNote
+            responses:
+                "201":
+                    description: Note task created successfully.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    note:
+                                        $ref: "#/components/schemas/Note"
+                "400":
+                    description: Bad Request – missing patientId and/or originalNote.
+                "403":
+                    description: Forbidden – only doctors can create note tasks.
+                "500":
+                    description: Internal Server Error.
+
+    /notes/get_my_tasks:
+        get:
+            summary: Get Active Note Tasks for Patient
+            description: >
+                Retrieves all active note tasks (where is_done is false) for the authenticated patient.
+                Only patients (authenticated users with role false) can access this endpoint.
+            security:
+                - bearerAuth: []
+            responses:
+                "200":
+                    description: A list of active note tasks for the patient.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    tasks:
+                                        type: array
+                                        items:
+                                            $ref: "#/components/schemas/Note"
+                "403":
+                    description: Forbidden – only patients can view tasks.
+                "500":
+                    description: Internal Server Error.
+
+components:
+    securitySchemes:
+        bearerAuth:
+            type: http
+            scheme: bearer
+            bearerFormat: JWT
+
+    schemas:
+        User:
+            type: object
+            properties:
+                _id:
+                    type: string
+                email:
+                    type: string
+                    format: email
+                verified:
+                    type: boolean
+                role:
+                    type: boolean
+                createdAt:
+                    type: string
+                    format: date-time
+                updatedAt:
+                    type: string
+                    format: date-time
+            required:
+                - email
+                - verified
+                - role
+
+        Assignment:
+            type: object
+            properties:
+                _id:
+                    type: string
+                doctor:
+                    type: string
+                patients:
+                    type: array
+                    items:
+                        type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                updatedAt:
+                    type: string
+                    format: date-time
+            required:
+                - doctor
+                - patients
+
+        Note:
+            type: object
+            properties:
+                _id:
+                    type: string
+                doctor_id:
+                    type: string
+                patient_id:
+                    type: string
+                original_note:
+                    type: string
+                extracted_actions:
+                    type: object
+                    properties:
+                        actionable_steps:
+                            type: object
+                            properties:
+                                checklist:
+                                    type: string
+                                plan:
+                                    type: string
+                                number_of_days:
+                                    type: number
+                                interval_between_days:
+                                    type: number
+                            required:
+                                - checklist
+                                - plan
+                                - number_of_days
+                                - interval_between_days
+                number_of_days_left:
+                    type: number
+                date_of_creation:
+                    type: string
+                    format: date-time
+                is_done:
+                    type: boolean
+                remind_patient_today:
+                    type: boolean
+                createdAt:
+                    type: string
+                    format: date-time
+                updatedAt:
+                    type: string
+                    format: date-time
+            required:
+                - doctor_id
+                - patient_id
+                - original_note
+                - extracted_actions
+                - number_of_days_left
+
+        SignupRequest:
+            type: object
+            properties:
+                email:
+                    type: string
+                    format: email
+                password:
+                    type: string
+                    minLength: 8
+                confirmPassword:
+                    type: string
+                    minLength: 8
+                userAgent:
+                    type: string
+                role:
+                    type: integer
+                    enum: [0, 1]
+                    description: 0 for patient, 1 for doctor.
+            required:
+                - email
+                - password
+                - confirmPassword
+                - role
+
+        LoginRequest:
+            type: object
+            properties:
+                email:
+                    type: string
+                    format: email
+                password:
+                    type: string
+                    minLength: 8
+                userAgent:
+                    type: string
+                role:
+                    type: integer
+                    enum: [0, 1]
+                    description: 0 for patient, 1 for doctor.
+            required:
+                - email
+                - password
+                - role
+
+        AuthResponse:
+            type: object
+            properties:
+                user:
+                    $ref: "#/components/schemas/User"
+                accessToken:
+                    type: string
+                refreshToken:
+                    type: string
